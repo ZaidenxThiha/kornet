@@ -131,7 +131,7 @@ python scripts/benchmark.py --results runs --output runs/benchmark.csv
 Inspect one image and launch the application:
 
 ```bash
-python predict.py --checkpoint runs/kornet_mvtec_bottle/seed_42/best.pt --image sample.png --threshold 0.42
+python predict.py --checkpoint runs/kornet_mvtec_bottle/seed_42/best.pt --image data/mvtec/bottle/test/broken_large/000.png --sort-mode hard
 streamlit run app/app.py
 ```
 
@@ -154,18 +154,31 @@ The normal prototype is an exponential moving average. The objective combines co
 
 For paper tables, report mean ± standard deviation over at least three predetermined seeds. Do not select the best seed. Preserve every run directory and configuration, including negative results. Compare KOR variants using exactly the same backbone, image resolution, data split, and training budget.
 
+### Completed MVTec AD Bottle run
+
+A full 100-epoch MVTec AD `bottle` run has been trained locally with seed 42 using the default adaptive KORNet configuration: pretrained ResNet18, 256×256 images, 256-dimensional features, four ranking heads, four fixed training iterations, and up to seven inference iterations. The best checkpoint was selected at epoch 99 using normal-only validation loss.
+
+```text
+runs/kornet_mvtec_bottle/seed_42/best.pt
+runs/kornet_mvtec_bottle/seed_42/metrics.json
+```
+
+The values below were produced by `evaluate.py` with hard ranking, Gaussian smoothing σ=4, and a decision threshold calibrated as the 99th percentile of held-out normal validation scores. Test data was not used for threshold calibration.
+
 | Model | Image AUROC | Pixel AUROC | AUPRO | F1 | Params | FLOPs | GPU ms | CPU ms | Avg Iterations |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | CNN | — | — | — | — | — | — | — | — | 0 |
 | CNN + attention | — | — | — | — | — | — | — | — | 1 |
 | CNN + KOR-1 | — | — | — | — | — | — | — | — | 1 |
 | KORNet fixed | — | — | — | — | — | — | — | — | — |
-| KORNet adaptive | — | — | — | — | — | — | — | — | — |
+| KORNet adaptive — Bottle, seed 42 | 98.57% | 90.30% | 54.79% | 95.87% | 12.00M | 6.93G | — | 39.28 | 7.00 |
 | PatchCore | — | — | — | — | — | — | — | — | — |
 | PaDiM | — | — | — | — | — | — | — | — | — |
 | EfficientAD | — | — | — | — | — | — | — | — | — |
 
-“—” means **not measured**, not zero. Cells are populated only by reproducible runs.
+Additional measured Bottle results were image average precision 99.58%, precision 100%, recall 92.06%, false-positive rate 0%, pixel average precision 29.59%, and pixel F1 26.61%. The calibrated image threshold was 0.05250. These are single-seed results, not a mean ± standard deviation, and do not establish superiority over a baseline.
+
+“—” means **not measured**, not zero. Cells are populated only by reproducible runs. The checkpoint, licensed dataset, and generated run artifacts are intentionally excluded from Git; rerun the documented commands to reproduce them locally.
 
 For established baselines, use their official repositories or a pinned release of a maintained framework such as Anomalib. Record repository URL, commit hash/package version, preprocessing, backbone, hardware, and command beside the resulting JSON. Do not compare KORNet to an improvised reimplementation. PatchCore, PaDiM, EfficientAD, Reverse Distillation, and FastFlow may have distinct backbone or licensing constraints; disclose these rather than implying a controlled KOR ablation.
 
@@ -194,14 +207,14 @@ export.py                 TorchScript and ONNX export
 
 ## Limitations and research status
 
-- No benchmark metrics ship with the repository; large licensed datasets and trained checkpoints are not included.
+- One measured single-seed MVTec AD Bottle summary is recorded above; the licensed dataset, checkpoint, and generated metric artifacts are not included in Git.
 - NeuralSort is quadratic in token count. Token reduction makes this honest and configurable but may discard small defects.
 - The simple global normal prototype can under-represent multimodal normal data. A category-specific memory bank is a justified future comparison.
 - AUPRO protocol details differ between libraries. This repository integrates PRO up to FPR 0.3; paper comparisons must use a consistent implementation.
 - Gaussian smoothing is evaluation-only and recorded in the output protocol.
 - Per-sample stopping still executes batched recursive calls until all samples finish, though completed samples are frozen. Deployment throughput therefore depends on batch composition.
 - ONNX operator support varies by runtime, particularly for exact sorting; the soft and hard exports must be validated on the intended runtime.
-- The primary hypothesis remains unconfirmed until controlled, repeated experiments beat or improve the efficiency frontier of strong reproduced baselines.
+- The Bottle result is promising but the primary hypothesis remains unconfirmed until controlled, repeated experiments compare against strong reproduced baselines and establish an improved efficiency frontier.
 
 ## Research integrity
 
