@@ -37,6 +37,8 @@ flowchart LR
 
 The soft training path uses NeuralSort and costs \(O(BHN^2)\). `max_tokens` makes that expense explicit and bounded. The hard deployment path uses `torch.argsort`. Multi-scale maps are reconstructed independently and averaged at input resolution.
 
+The optimized configuration adds a normal-only spatial-statistics head. It keeps an EMA mean and diagonal variance for each token location, blends the recursive representation with the initial CNN representation, and pools the highest-scoring token fraction for image detection. This preserves the backbone signal while allowing opposing-ranking recursion to contribute. No anomalous image or mask is used to fit these statistics.
+
 ## Install
 
 Python 3.10+ is required. CUDA or Apple Metal (MPS) is used automatically when available.
@@ -80,6 +82,7 @@ Train one category:
 
 ```bash
 python train.py --config configs/kornet_mvtec.yaml
+python train.py --config configs/kornet_mvtec_optimized.yaml
 python train.py --config configs/kornet_mvtec.yaml --category cable --seed 123
 python train.py --config configs/kornet_mvtec.yaml --resume runs/kornet_mvtec_bottle/seed_42/last.pt
 ```
@@ -157,17 +160,18 @@ For paper tables, report mean ± standard deviation over at least three predeter
 
 ### Completed MVTec AD Bottle study
 
-The five controlled model families below were each trained for three predetermined seeds (42, 123, and 456) using the same Bottle split, pretrained ResNet18 backbone, 256×256 input, and training budget. Values are mean ± sample standard deviation. Evaluation uses exact hard ranking, Gaussian smoothing σ=4, and an image threshold calibrated from held-out normal validation data only.
+The five original controlled model families and the optimized model below were each trained for three predetermined seeds (42, 123, and 456) using the same Bottle split, pretrained ResNet18 backbone, 256×256 input, and training budget. Values are mean ± sample standard deviation. Evaluation uses exact hard ranking, Gaussian smoothing σ=4, and an image threshold calibrated from held-out normal validation data only.
 
 | Model | Image AUROC | Pixel AUROC | AUPRO | Image F1 | Params | FLOPs | MPS ms/image | Avg iterations |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| CNN | **99.58 ± 0.12%** | **95.62 ± 0.06%** | **68.57 ± 2.76%** | 95.54 ± 3.60% | 11.41M | 4.88G | **3.18 ± 0.05** | 0.00 |
+| CNN | 99.58 ± 0.12% | **95.62 ± 0.06%** | **68.57 ± 2.76%** | 95.54 ± 3.60% | 11.41M | 4.88G | **3.18 ± 0.05** | 0.00 |
 | CNN + attention | 96.40 ± 0.26% | 77.85 ± 3.14% | 22.08 ± 3.90% | 86.37 ± 4.56% | 11.67M | 4.88G | 3.90 ± 0.99 | 1.00 |
 | CNN + KOR-1 | 96.59 ± 0.57% | 79.93 ± 2.55% | 26.44 ± 7.09% | 85.35 ± 4.17% | 12.00M | 5.39G | 4.42 ± 0.04 | 1.00 |
 | KORNet fixed | 96.24 ± 0.36% | 89.69 ± 0.37% | 44.35 ± 6.38% | 90.96 ± 1.64% | 12.00M | 6.93G | 8.20 ± 0.03 | 7.00 |
 | KORNet adaptive | 97.14 ± 1.33% | 88.84 ± 2.21% | 49.15 ± 2.78% | 91.67 ± 3.64% | 12.00M | 6.93G | 8.15 ± 0.04 | 7.00 |
+| **KORNet optimized** | **99.84 ± 0.08%** | 93.12 ± 0.51% | 56.63 ± 4.88% | **98.14 ± 0.50%** | 11.77M | 6.00G | 6.25 ± 0.25 | 5.00 |
 
-The controlled result does not support a Bottle accuracy or efficiency advantage for KORNet: the CNN baseline is strongest on image AUROC, pixel AUROC, and AUPRO while also being fastest. The adaptive model reached its seven-iteration maximum for every evaluated sample, so it showed no early-stopping gain on this category.
+Optimized KORNet beats the matched CNN on image AUROC for every seed and improves the three-seed mean by 0.26 percentage points. It also improves mean image F1 by 2.60 points. This is an image-level detection gain, not an overall win: CNN remains better on pixel AUROC (95.62% versus 93.12%), AUPRO (68.57% versus 56.63%), and MPS latency (3.18 ms versus 6.25 ms). The original adaptive model reached its seven-iteration maximum for every evaluated sample; the optimized model uses a five-iteration maximum and likewise does not show an adaptive-stopping gain on Bottle.
 
 The mandatory architectural ablations below use seed 42 and are therefore diagnostic single-run results, not uncertainty estimates. Equivalent controls reuse the identical completed run: heads=4 and iterations=7 use the default adaptive checkpoint; iterations=1 uses the no-recursion checkpoint; fixed uses the fixed-family checkpoint. This avoids relabeling duplicate computation as independent evidence.
 
@@ -196,7 +200,7 @@ Hard and soft sorting were also evaluated from the same default seed-42 checkpoi
 | Hard (`torch.argsort`) | **98.57%** | 90.33% | **52.36%** | **95.87%** | **8.17** |
 | Soft (NeuralSort) | 98.33% | **90.59%** | 52.30% | 95.00% | 11.82 |
 
-All primary runs reached 100 epochs. The heads=8, iterations=10, and no-convergence-loss ablations stopped at epoch 35 under the configured normal-validation early-stopping rule; all other distinct ablations reached 100 epochs. Latency is measured on Apple MPS and includes model forward synchronization but not data loading. It is a local deployment measurement rather than a cross-hardware comparison.
+All primary and optimized runs reached 100 epochs. The heads=8, iterations=10, and no-convergence-loss ablations stopped at epoch 35 under the configured normal-validation early-stopping rule; all other distinct ablations reached 100 epochs. Latency is measured on Apple MPS and includes model forward synchronization but not data loading. It is a local deployment measurement rather than a cross-hardware comparison.
 
 The complete per-run records are generated by `scripts/benchmark.py` as `runs/benchmark.csv` and `runs/benchmark_summary.csv`. Checkpoints, the licensed dataset, and generated predictions remain excluded from Git; rerun the documented commands to reproduce them locally.
 
@@ -234,7 +238,7 @@ export.py                 TorchScript and ONNX export
 - Gaussian smoothing is evaluation-only and recorded in the output protocol.
 - Per-sample stopping still executes batched recursive calls until all samples finish, though completed samples are frozen. Deployment throughput therefore depends on batch composition.
 - ONNX operator support varies by runtime, particularly for exact sorting; the soft and hard exports must be validated on the intended runtime.
-- The Bottle study does not confirm the primary hypothesis: the controlled CNN baseline is both more accurate and faster. Broader category-level evidence is required before drawing a general conclusion.
+- Optimized KORNet confirms a small, repeatable Bottle image-level AUROC gain over the controlled CNN, but it remains worse at pixel localization and latency. Broader category-level evidence is required before drawing a general conclusion.
 
 ## Research integrity
 

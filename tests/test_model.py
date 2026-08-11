@@ -63,6 +63,29 @@ def test_prototype_update_and_state_round_trip(tmp_path):
     assert torch.allclose(model.anomaly_head.prototype, restored.anomaly_head.prototype)
 
 
+def test_spatial_residual_head_updates_and_round_trips(tmp_path):
+    options = {
+        "spatial_weight": 0.8,
+        "initial_residual_weight": 0.6,
+        "topk_fraction": 0.25,
+    }
+    model = small_model(**options).eval()
+    with torch.no_grad():
+        output = model(torch.randn(2, 3, 64, 64))
+        model.anomaly_head.update_prototype(output["tokens"], output["initial_tokens"])
+        scored = model(torch.randn(1, 3, 64, 64))
+    assert torch.isfinite(scored["image_score"]).all()
+    assert torch.isfinite(scored["anomaly_map"]).all()
+    path = tmp_path / "spatial_state.pt"
+    torch.save(model.state_dict(), path)
+    restored = small_model(**options)
+    restored.load_state_dict(torch.load(path, weights_only=True))
+    assert torch.allclose(
+        model.anomaly_head.spatial_prototype,
+        restored.anomaly_head.spatial_prototype,
+    )
+
+
 def test_cnn_baseline_has_no_kor_parameters_and_loss_executes():
     config = {
         "variant": "cnn",

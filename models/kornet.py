@@ -30,6 +30,10 @@ class KORNet(nn.Module):
         ranking="learned",
         opposing_subtraction=True,
         score_weights=(1.0, 0.2, 0.1),
+        spatial_weight=0.0,
+        initial_residual_weight=0.0,
+        topk_fraction=1.0,
+        variance_floor=1e-4,
         **_: dict,
     ) -> None:
         super().__init__()
@@ -46,7 +50,15 @@ class KORNet(nn.Module):
             ranking,
             opposing_subtraction,
         )
-        self.anomaly_head = AnomalyHead(feature_dim, score_weights)
+        self.anomaly_head = AnomalyHead(
+            feature_dim,
+            score_weights,
+            token_count=self.tokenizer.token_count,
+            spatial_weight=spatial_weight,
+            initial_residual_weight=initial_residual_weight,
+            topk_fraction=topk_fraction,
+            variance_floor=variance_floor,
+        )
         self.max_iterations = max_iterations
         self.train_iterations = train_iterations
         self.min_iterations = min_iterations
@@ -111,7 +123,13 @@ class KORNet(nn.Module):
                     break
         assert last_diag is not None
         image_score, anomaly_map, score_components = self.anomaly_head(
-            tokens, dynamics, final_rank_difference, shapes, images.shape[-2:], used_iterations
+            tokens,
+            dynamics,
+            final_rank_difference,
+            shapes,
+            images.shape[-2:],
+            used_iterations,
+            initial,
         )
         stability_next, _ = self.kor(tokens, sort_mode)
         return {

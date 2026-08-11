@@ -82,15 +82,16 @@ class MultiScaleTokenizer(nn.Module):
         self.feature_indices = list(range(len(channels))) if multi_scale else [-1]
         self.projections = nn.ModuleList(nn.Conv2d(c, dim, 1) for c in selected)
         self.max_tokens = max_tokens
+        per_level = max(1, max_tokens // len(selected))
+        self.target_side = max(1, int(per_level**0.5))
+        self.token_count = len(selected) * self.target_side**2
 
     def forward(self, features: list[torch.Tensor]):
         chosen = [features[i] for i in self.feature_indices]
         tokens, shapes = [], []
-        per_level = max(1, self.max_tokens // len(chosen))
-        target_side = max(1, int(per_level**0.5))
         for projection, feature in zip(self.projections, chosen):
             x = projection(feature)
-            h = w = target_side
+            h = w = self.target_side
             if x.device.type == "mps" and (x.shape[-2] % h != 0 or x.shape[-1] % w != 0):
                 # MPS does not implement non-divisible adaptive pooling. Device-copy
                 # operations retain autograd, preserving the exact pooling semantics.

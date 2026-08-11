@@ -160,7 +160,7 @@ def train(config: dict) -> Path:
                     adaptive=adaptive_training,
                     iterations=model.max_iterations if adaptive_training else None,
                 )
-                model.anomaly_head.update_prototype(output["tokens"])
+                model.anomaly_head.update_prototype(output["tokens"], output.get("initial_tokens"))
                 items = criterion(output, model.anomaly_head.prototype)
             scaler.scale(items["total"]).backward()
             scaler.unscale_(optimizer)
