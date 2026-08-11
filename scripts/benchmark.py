@@ -29,8 +29,14 @@ def main():
     rows = []
     for path in files:
         data = json.loads(path.read_text())
+        run = path.parent.parent.name if path.parent.name.startswith("seed_") else path.parent.name
+        seed = (
+            path.parent.name.removeprefix("seed_") if path.parent.name.startswith("seed_") else None
+        )
         rows.append(
             {
+                "Run": run,
+                "Seed": seed,
                 "Model": data.get("model"),
                 "Dataset": data.get("dataset"),
                 "Category": data.get("category"),
@@ -41,6 +47,7 @@ def main():
                 "Params": nested(data, "efficiency", "parameters"),
                 "Model MB": nested(data, "efficiency", "model_size_mb"),
                 "Latency ms": nested(data, "efficiency", "latency_ms_mean"),
+                "Latency device": nested(data, "efficiency", "latency_device"),
                 "Avg Iterations": nested(data, "efficiency", "avg_iterations"),
                 "Source": str(path),
             }
@@ -52,6 +59,24 @@ def main():
     output.with_suffix(".md").write_text(
         frame.to_markdown(index=False) if not frame.empty else "No measured results.\n"
     )
+    if not frame.empty:
+        measures = [
+            "Image AUROC",
+            "Pixel AUROC",
+            "AUPRO",
+            "F1",
+            "Params",
+            "Latency ms",
+            "Avg Iterations",
+        ]
+        summary = frame.groupby(["Run", "Model", "Dataset", "Category"], dropna=False)[
+            measures
+        ].agg(["count", "mean", "std"])
+        summary.columns = [f"{metric} {stat}" for metric, stat in summary.columns]
+        summary = summary.reset_index()
+        summary_output = output.with_name(f"{output.stem}_summary{output.suffix}")
+        summary.to_csv(summary_output, index=False)
+        summary_output.with_suffix(".md").write_text(summary.to_markdown(index=False))
     print(frame.to_string(index=False) if not frame.empty else "No metrics files found.")
 
 

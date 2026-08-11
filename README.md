@@ -39,7 +39,7 @@ The soft training path uses NeuralSort and costs \(O(BHN^2)\). `max_tokens` make
 
 ## Install
 
-Python 3.10+ is required. CUDA is used automatically when available.
+Python 3.10+ is required. CUDA or Apple Metal (MPS) is used automatically when available.
 
 ```bash
 python -m venv .venv
@@ -81,6 +81,7 @@ Train one category:
 ```bash
 python train.py --config configs/kornet_mvtec.yaml
 python train.py --config configs/kornet_mvtec.yaml --category cable --seed 123
+python train.py --config configs/kornet_mvtec.yaml --resume runs/kornet_mvtec_bottle/seed_42/last.pt
 ```
 
 Train all categories with the default three seeds (42, 123, 456):
@@ -154,57 +155,50 @@ The normal prototype is an exponential moving average. The objective combines co
 
 For paper tables, report mean ± standard deviation over at least three predetermined seeds. Do not select the best seed. Preserve every run directory and configuration, including negative results. Compare KOR variants using exactly the same backbone, image resolution, data split, and training budget.
 
-### Completed MVTec AD Bottle run
+### Completed MVTec AD Bottle study
 
-A full 100-epoch MVTec AD `bottle` run has been trained locally with seed 42 using the default adaptive KORNet configuration: pretrained ResNet18, 256×256 images, 256-dimensional features, four ranking heads, four fixed training iterations, and up to seven inference iterations. The best checkpoint was selected at epoch 99 using normal-only validation loss.
+The five controlled model families below were each trained for three predetermined seeds (42, 123, and 456) using the same Bottle split, pretrained ResNet18 backbone, 256×256 input, and training budget. Values are mean ± sample standard deviation. Evaluation uses exact hard ranking, Gaussian smoothing σ=4, and an image threshold calibrated from held-out normal validation data only.
 
-```text
-runs/kornet_mvtec_bottle/seed_42/best.pt
-runs/kornet_mvtec_bottle/seed_42/metrics.json
-```
+| Model | Image AUROC | Pixel AUROC | AUPRO | Image F1 | Params | FLOPs | MPS ms/image | Avg iterations |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| CNN | **99.58 ± 0.12%** | **95.62 ± 0.06%** | **68.57 ± 2.76%** | 95.54 ± 3.60% | 11.41M | 4.88G | **3.18 ± 0.05** | 0.00 |
+| CNN + attention | 96.40 ± 0.26% | 77.85 ± 3.14% | 22.08 ± 3.90% | 86.37 ± 4.56% | 11.67M | 4.88G | 3.90 ± 0.99 | 1.00 |
+| CNN + KOR-1 | 96.59 ± 0.57% | 79.93 ± 2.55% | 26.44 ± 7.09% | 85.35 ± 4.17% | 12.00M | 5.39G | 4.42 ± 0.04 | 1.00 |
+| KORNet fixed | 96.24 ± 0.36% | 89.69 ± 0.37% | 44.35 ± 6.38% | 90.96 ± 1.64% | 12.00M | 6.93G | 8.20 ± 0.03 | 7.00 |
+| KORNet adaptive | 97.14 ± 1.33% | 88.84 ± 2.21% | 49.15 ± 2.78% | 91.67 ± 3.64% | 12.00M | 6.93G | 8.15 ± 0.04 | 7.00 |
 
-The values below were produced by `evaluate.py` with hard ranking, Gaussian smoothing σ=4, and a decision threshold calibrated as the 99th percentile of held-out normal validation scores. Test data was not used for threshold calibration.
+The controlled result does not support a Bottle accuracy or efficiency advantage for KORNet: the CNN baseline is strongest on image AUROC, pixel AUROC, and AUPRO while also being fastest. The adaptive model reached its seven-iteration maximum for every evaluated sample, so it showed no early-stopping gain on this category.
 
-| Model | Image AUROC | Pixel AUROC | AUPRO | F1 | Params | FLOPs | GPU ms | CPU ms | Avg Iterations |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| CNN | — | — | — | — | — | — | — | — | 0 |
-| CNN + attention | — | — | — | — | — | — | — | — | 1 |
-| CNN + KOR-1 | — | — | — | — | — | — | — | — | 1 |
-| KORNet fixed | — | — | — | — | — | — | — | — | — |
-| KORNet adaptive — Bottle, seed 42 | 98.57% | 90.30% | 54.79% | 95.87% | 12.00M | 6.93G | — | 39.28 | 7.00 |
-| PatchCore | — | — | — | — | — | — | — | — | — |
-| PaDiM | — | — | — | — | — | — | — | — | — |
-| EfficientAD | — | — | — | — | — | — | — | — | — |
+The mandatory architectural ablations below use seed 42 and are therefore diagnostic single-run results, not uncertainty estimates. Equivalent controls reuse the identical completed run: heads=4 and iterations=7 use the default adaptive checkpoint; iterations=1 uses the no-recursion checkpoint; fixed uses the fixed-family checkpoint. This avoids relabeling duplicate computation as independent evidence.
 
-Detailed quality metrics for the completed run:
+| Ablation | Image AUROC | Pixel AUROC | AUPRO | Image F1 | MPS ms/image | Iterations |
+|---|---:|---:|---:|---:|---:|---:|
+| No opposing subtraction | 87.70% | 77.59% | 45.02% | 72.73% | 7.84 | 7 |
+| No recursion / iterations=1 | 97.62% | 81.18% | 29.03% | 88.50% | 4.36 | 1 |
+| Heads=1 | 26.90% | 41.03% | 8.63% | 6.15% | 8.60 | 7 |
+| Heads=2 | 97.30% | 90.33% | 54.35% | 94.12% | 6.55 | 7 |
+| Heads=4 (default) | 98.57% | 90.33% | 52.36% | 95.87% | 8.17 | 7 |
+| Heads=8 | 95.87% | 88.15% | 51.60% | 93.33% | 12.56 | 7 |
+| Iterations=2 | 94.37% | 91.09% | 55.03% | 90.43% | 5.04 | 2 |
+| Iterations=3 | 95.40% | 90.25% | 48.70% | 92.31% | 5.64 | 3 |
+| Iterations=5 | 98.02% | 90.34% | 54.47% | 95.87% | 6.87 | 5 |
+| Iterations=7 (default) | 98.57% | 90.33% | 52.36% | 95.87% | 8.17 | 7 |
+| Iterations=10 | 95.40% | 80.48% | 38.65% | 90.76% | 10.16 | 10 |
+| Fixed stopping | 96.59% | 89.26% | 40.66% | 90.43% | 8.17 | 7 |
+| Single-scale features | **99.44%** | **93.16%** | **63.05%** | **98.39%** | 8.54 | 7 |
+| Magnitude ranking | 97.14% | 90.87% | 51.24% | 91.67% | 8.05 | 7 |
+| No convergence loss | 96.43% | 87.42% | 46.85% | 92.31% | 8.25 | 7 |
 
-| Image AUROC | Image AP | Image F1 | Precision | Recall | FPR | Pixel AUROC | Pixel AP | Pixel F1 | AUPRO |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 98.57% | 99.58% | 95.87% | 100.00% | 92.06% | 0.00% | 90.30% | 29.59% | 26.61% | 54.79% |
+Hard and soft sorting were also evaluated from the same default seed-42 checkpoint:
 
-Measured efficiency and convergence:
+| Ranking | Image AUROC | Pixel AUROC | AUPRO | Image F1 | MPS ms/image |
+|---|---:|---:|---:|---:|---:|
+| Hard (`torch.argsort`) | **98.57%** | 90.33% | **52.36%** | **95.87%** | **8.17** |
+| Soft (NeuralSort) | 98.33% | **90.59%** | 52.30% | 95.00% | 11.82 |
 
-| Parameters | Model size | MACs | Estimated FLOPs | CPU latency | GPU latency | Avg iterations | Median iterations | P95 iterations |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 11,999,813 | 45.78 MB | 3.47G | 6.93G | 39.28 ms/image | — | 7.00 | 7.00 | 7.00 |
+All primary runs reached 100 epochs. The heads=8, iterations=10, and no-convergence-loss ablations stopped at epoch 35 under the configured normal-validation early-stopping rule; all other distinct ablations reached 100 epochs. Latency is measured on Apple MPS and includes model forward synchronization but not data loading. It is a local deployment measurement rather than a cross-hardware comparison.
 
-Evaluation protocol:
-
-| Property | Value |
-|---|---|
-| Dataset/category | MVTec AD / Bottle |
-| Seed | 42 |
-| Checkpoint selection | Lowest normal-only validation loss; epoch 99 |
-| Inference ranking | Hard (`torch.argsort`) |
-| Image threshold | 0.05250 |
-| Threshold source | 99th percentile of held-out normal validation scores |
-| Test data used for calibration | No |
-| Anomaly-map smoothing | Gaussian σ=4.0 |
-| Latency device | CPU |
-
-These are single-seed results, not a mean ± standard deviation, and do not establish superiority over a baseline. The adaptive model reached the configured maximum of seven iterations for every measured test sample, so this run does not demonstrate an early-stopping efficiency gain.
-
-“—” means **not measured**, not zero. Cells are populated only by reproducible runs. The checkpoint, licensed dataset, and generated run artifacts are intentionally excluded from Git; rerun the documented commands to reproduce them locally.
+The complete per-run records are generated by `scripts/benchmark.py` as `runs/benchmark.csv` and `runs/benchmark_summary.csv`. Checkpoints, the licensed dataset, and generated predictions remain excluded from Git; rerun the documented commands to reproduce them locally.
 
 For established baselines, use their official repositories or a pinned release of a maintained framework such as Anomalib. Record repository URL, commit hash/package version, preprocessing, backbone, hardware, and command beside the resulting JSON. Do not compare KORNet to an improvised reimplementation. PatchCore, PaDiM, EfficientAD, Reverse Distillation, and FastFlow may have distinct backbone or licensing constraints; disclose these rather than implying a controlled KOR ablation.
 
@@ -233,14 +227,14 @@ export.py                 TorchScript and ONNX export
 
 ## Limitations and research status
 
-- One measured single-seed MVTec AD Bottle summary is recorded above; the licensed dataset, checkpoint, and generated metric artifacts are not included in Git.
+- The completed controlled study currently covers only MVTec AD Bottle. Other MVTec AD categories and MVTec AD 2 require their official data before training.
 - NeuralSort is quadratic in token count. Token reduction makes this honest and configurable but may discard small defects.
 - The simple global normal prototype can under-represent multimodal normal data. A category-specific memory bank is a justified future comparison.
 - AUPRO protocol details differ between libraries. This repository integrates PRO up to FPR 0.3; paper comparisons must use a consistent implementation.
 - Gaussian smoothing is evaluation-only and recorded in the output protocol.
 - Per-sample stopping still executes batched recursive calls until all samples finish, though completed samples are frozen. Deployment throughput therefore depends on batch composition.
 - ONNX operator support varies by runtime, particularly for exact sorting; the soft and hard exports must be validated on the intended runtime.
-- The Bottle result is promising but the primary hypothesis remains unconfirmed until controlled, repeated experiments compare against strong reproduced baselines and establish an improved efficiency frontier.
+- The Bottle study does not confirm the primary hypothesis: the controlled CNN baseline is both more accurate and faster. Broader category-level evidence is required before drawing a general conclusion.
 
 ## Research integrity
 

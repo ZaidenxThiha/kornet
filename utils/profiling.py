@@ -5,6 +5,8 @@ import time
 
 import torch
 
+from .device import synchronize
+
 
 def parameter_count(model) -> int:
     return sum(parameter.numel() for parameter in model.parameters())
@@ -21,14 +23,13 @@ def benchmark_latency(model, sample, device, warmup=5, repeats=20, **forward_kwa
     for _ in range(warmup):
         model(sample, **forward_kwargs)
     if device.type == "cuda":
-        torch.cuda.synchronize(device)
         torch.cuda.reset_peak_memory_stats(device)
+    synchronize(device)
     timings = []
     for _ in range(repeats):
         start = time.perf_counter()
         model(sample, **forward_kwargs)
-        if device.type == "cuda":
-            torch.cuda.synchronize(device)
+        synchronize(device)
         timings.append((time.perf_counter() - start) * 1000)
     peak_mb = torch.cuda.max_memory_allocated(device) / 1024**2 if device.type == "cuda" else None
     return {

@@ -91,7 +91,12 @@ class MultiScaleTokenizer(nn.Module):
         for projection, feature in zip(self.projections, chosen):
             x = projection(feature)
             h = w = target_side
-            x = nn.functional.adaptive_avg_pool2d(x, (h, w))
+            if x.device.type == "mps" and (x.shape[-2] % h != 0 or x.shape[-1] % w != 0):
+                # MPS does not implement non-divisible adaptive pooling. Device-copy
+                # operations retain autograd, preserving the exact pooling semantics.
+                x = nn.functional.adaptive_avg_pool2d(x.cpu(), (h, w)).to(x.device)
+            else:
+                x = nn.functional.adaptive_avg_pool2d(x, (h, w))
             shapes.append((h, w))
             tokens.append(x.flatten(2).transpose(1, 2))
         return torch.cat(tokens, dim=1), shapes

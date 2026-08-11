@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from datasets import build_datasets
 from models import build_model
 from utils.checkpoint import load_checkpoint
 from utils.config import load_config, save_json
+from utils.device import default_device, synchronize
 from utils.metrics import (
     calibrate_threshold,
     classification_metrics,
@@ -29,12 +31,16 @@ def collect(model, loader, device, adaptive=True, sort_mode=None, gaussian_sigma
     model.eval()
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
-    for batch in tqdm(loader, desc="evaluate", leave=False):
+    for batch in tqdm(
+        loader,
+        desc="evaluate",
+        leave=False,
+        disable=os.environ.get("KORNET_QUIET") == "1",
+    ):
         images = batch["image"].to(device)
         start = time.perf_counter()
         output = model(images, adaptive=adaptive, sort_mode=sort_mode)
-        if device.type == "cuda":
-            torch.cuda.synchronize(device)
+        synchronize(device)
         elapsed = (time.perf_counter() - start) * 1000 / images.shape[0]
         batch_maps = output["anomaly_map"].squeeze(1).cpu().numpy()
         if gaussian_sigma > 0:
@@ -64,10 +70,10 @@ def evaluate(checkpoint_path, config_path=None, output_path=None, sort_mode=None
     config = load_config(config_path) if config_path else raw.get("config")
     if not config:
         raise ValueError("Config is absent from checkpoint; pass --config")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = default_device()
     datasets = build_datasets(config["dataset"])
     batch_size = config["training"].get("batch_size", 16)
-    workers = config["dataset"].get("num_workers", 4)
+    workers = int(os.environ.get("KORNET_NUM_WORKERS", config["dataset"].get("num_workers", 4)))
     loaders = {
         name: DataLoader(
             ds,

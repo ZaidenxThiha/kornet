@@ -12,6 +12,7 @@ from PIL import Image
 from datasets.transforms import build_transform
 from models import build_model
 from utils.checkpoint import load_checkpoint
+from utils.device import default_device, synchronize
 from utils.visualization import save_heatmap
 
 
@@ -23,7 +24,7 @@ def predict(checkpoint, image_path, output_dir="outputs", threshold=None, sort_m
         metrics_path = Path(checkpoint).with_name("metrics.json")
         if metrics_path.exists():
             threshold = json.loads(metrics_path.read_text()).get("image", {}).get("threshold")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = default_device()
     model = build_model(config["model"]).to(device).eval()
     load_checkpoint(checkpoint, model, map_location=device)
     original = Image.open(image_path).convert("RGB")
@@ -31,8 +32,7 @@ def predict(checkpoint, image_path, output_dir="outputs", threshold=None, sort_m
     tensor, _ = build_transform(size)(original)
     start = time.perf_counter()
     output = model(tensor[None].to(device), sort_mode=sort_mode)
-    if device.type == "cuda":
-        torch.cuda.synchronize()
+    synchronize(device)
     latency = (time.perf_counter() - start) * 1000
     score = float(output["image_score"][0])
     anomaly_map = output["anomaly_map"][0, 0].cpu().numpy()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import os
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,7 @@ from losses import KORNetLoss
 from models import build_model
 from utils.checkpoint import load_checkpoint, save_checkpoint
 from utils.config import load_config, save_config
+from utils.device import default_device
 from utils.seed import seed_everything, seed_worker
 from utils.visualization import plot_training
 
@@ -64,21 +66,22 @@ def validate(model, loader, criterion, device):
 
 def train(config: dict) -> Path:
     seed_everything(int(config.get("seed", 42)))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = default_device()
     datasets = build_datasets(config["dataset"])
     training = config["training"]
+    workers = int(os.environ.get("KORNET_NUM_WORKERS", config["dataset"].get("num_workers", 4)))
     train_loader = make_loader(
         datasets["train"],
         training["batch_size"],
         True,
-        config["dataset"].get("num_workers", 4),
+        workers,
         device,
     )
     val_loader = make_loader(
         datasets["val"],
         training["batch_size"],
         False,
-        config["dataset"].get("num_workers", 4),
+        workers,
         device,
     )
     model = build_model(config["model"]).to(device)
@@ -116,10 +119,34 @@ def train(config: dict) -> Path:
         start_epoch = int(state["epoch"]) + 1
         best_loss = float(state.get("best_metric") or best_loss)
     history, stale_epochs = [], 0
+    history_path = run_dir / "history.csv"
+    if start_epoch and history_path.exists():
+        with history_path.open(newline="") as handle:
+            for saved_row in csv.DictReader(handle):
+                history.append(
+                    {
+                        key: int(value) if key == "epoch" else float(value)
+                        for key, value in saved_row.items()
+                    }
+                )
+        validation_losses = [row["val_loss"] for row in history]
+        if validation_losses:
+            best_loss = min(best_loss, min(validation_losses))
+            last_best_index = max(
+                index
+                for index, value in enumerate(validation_losses)
+                if value == min(validation_losses)
+            )
+            stale_epochs = len(validation_losses) - last_best_index - 1
     for epoch in range(start_epoch, training["epochs"]):
         model.train()
         totals, feature_stds = [], []
-        progress = tqdm(train_loader, desc=f"epoch {epoch + 1}/{training['epochs']}", leave=False)
+        progress = tqdm(
+            train_loader,
+            desc=f"epoch {epoch + 1}/{training['epochs']}",
+            leave=False,
+            disable=os.environ.get("KORNET_QUIET") == "1",
+        )
         adaptive_training = bool(
             getattr(model, "adaptive_stop", False)
             and epoch >= training.get("fixed_iterations_until_epoch", training["epochs"])
@@ -153,7 +180,7 @@ def train(config: dict) -> Path:
             **validation,
         }
         history.append(row)
-        with (run_dir / "history.csv").open("w", newline="") as handle:
+        with history_path.open("w", newline="") as handle:
             output_csv = csv.DictWriter(handle, fieldnames=row.keys())
             output_csv.writeheader()
             output_csv.writerows(history)
@@ -163,7 +190,6 @@ def train(config: dict) -> Path:
                     writer.add_scalar(key, value, epoch + 1)
         if wandb_run:
             wandb_run.log(row, step=epoch + 1)
-        save_checkpoint(run_dir / "last.pt", model, optimizer, scheduler, epoch, best_loss, config)
         if validation["val_loss"] < best_loss:
             best_loss, stale_epochs = validation["val_loss"], 0
             save_checkpoint(
@@ -171,6 +197,7 @@ def train(config: dict) -> Path:
             )
         else:
             stale_epochs += 1
+        save_checkpoint(run_dir / "last.pt", model, optimizer, scheduler, epoch, best_loss, config)
         if row["feature_std"] < 1e-3:
             print("WARNING: feature variance is near zero; possible representation collapse.")
         if stale_epochs >= training.get("early_stopping_patience", 15):
@@ -189,6 +216,7 @@ def main():
     parser.add_argument("--category")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--variant")
+    parser.add_argument("--resume", help="Resume from a last.pt checkpoint")
     args = parser.parse_args()
     config = load_config(args.config)
     if args.category:
@@ -204,6 +232,8 @@ def main():
         config["experiment_name"] = (
             f"{args.variant}_{config['dataset']['name']}_{config['dataset']['category']}"
         )
+    if args.resume:
+        config["training"]["resume"] = args.resume
     checkpoint = train(config)
     print(f"Best checkpoint: {checkpoint.resolve()}")
 

@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from datasets.transforms import build_transform
 from models import build_model
 from utils.checkpoint import load_checkpoint
+from utils.device import default_device, synchronize
 from utils.visualization import heatmap_overlay, normalize_map
 
 st.set_page_config(page_title="KORNet Inspector", page_icon="🔬", layout="wide")
@@ -46,7 +47,7 @@ def load_model(path: str):
     config = state.get("config")
     if not config:
         raise ValueError("Checkpoint has no embedded configuration")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = default_device()
     model = build_model(config["model"]).to(device).eval()
     load_checkpoint(path, model, map_location=device)
     metrics_path = Path(path).with_name("metrics.json")
@@ -107,8 +108,7 @@ try:
     with st.spinner("Running recursive opposing-ranking analysis…"), torch.inference_mode():
         start = time.perf_counter()
         output = model(tensor[None].to(device), sort_mode=sorting)
-        if device.type == "cuda":
-            torch.cuda.synchronize(device)
+        synchronize(device)
         latency = (time.perf_counter() - start) * 1000
 except Exception as exc:  # noqa: BLE001 - the UI must render model/load failures cleanly
     st.exception(exc)
