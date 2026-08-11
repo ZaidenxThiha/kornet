@@ -176,7 +176,33 @@ The values below were produced by `evaluate.py` with hard ranking, Gaussian smoo
 | PaDiM | — | — | — | — | — | — | — | — | — |
 | EfficientAD | — | — | — | — | — | — | — | — | — |
 
-Additional measured Bottle results were image average precision 99.58%, precision 100%, recall 92.06%, false-positive rate 0%, pixel average precision 29.59%, and pixel F1 26.61%. The calibrated image threshold was 0.05250. These are single-seed results, not a mean ± standard deviation, and do not establish superiority over a baseline.
+Detailed quality metrics for the completed run:
+
+| Image AUROC | Image AP | Image F1 | Precision | Recall | FPR | Pixel AUROC | Pixel AP | Pixel F1 | AUPRO |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 98.57% | 99.58% | 95.87% | 100.00% | 92.06% | 0.00% | 90.30% | 29.59% | 26.61% | 54.79% |
+
+Measured efficiency and convergence:
+
+| Parameters | Model size | MACs | Estimated FLOPs | CPU latency | GPU latency | Avg iterations | Median iterations | P95 iterations |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 11,999,813 | 45.78 MB | 3.47G | 6.93G | 39.28 ms/image | — | 7.00 | 7.00 | 7.00 |
+
+Evaluation protocol:
+
+| Property | Value |
+|---|---|
+| Dataset/category | MVTec AD / Bottle |
+| Seed | 42 |
+| Checkpoint selection | Lowest normal-only validation loss; epoch 99 |
+| Inference ranking | Hard (`torch.argsort`) |
+| Image threshold | 0.05250 |
+| Threshold source | 99th percentile of held-out normal validation scores |
+| Test data used for calibration | No |
+| Anomaly-map smoothing | Gaussian σ=4.0 |
+| Latency device | CPU |
+
+These are single-seed results, not a mean ± standard deviation, and do not establish superiority over a baseline. The adaptive model reached the configured maximum of seven iterations for every measured test sample, so this run does not demonstrate an early-stopping efficiency gain.
 
 “—” means **not measured**, not zero. Cells are populated only by reproducible runs. The checkpoint, licensed dataset, and generated run artifacts are intentionally excluded from Git; rerun the documented commands to reproduce them locally.
 
