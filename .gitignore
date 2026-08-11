@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+data/
+runs/
+checkpoints/
+outputs/
+*.onnx
+*.pt
+*.pth
+.DS_Store
+wandb/
+*.egg-info/
