@@ -32,14 +32,15 @@ class AnomalyDataset(Dataset):
     def __getitem__(self, index: int) -> dict:
         sample = self.samples[index]
         image = Image.open(sample.image).convert("RGB")
-        mask = (
-            Image.open(sample.mask).convert("L") if sample.mask and sample.mask.exists() else None
-        )
+        mask_exists = bool(sample.mask and sample.mask.is_file())
+        mask_valid = sample.label == 0 or mask_exists
+        mask = Image.open(sample.mask).convert("L") if mask_exists else None
         image_t, mask_t = self.transform(image, mask)
         return {
             "image": image_t,
             "mask": mask_t,
             "label": sample.label,
+            "mask_valid": mask_valid,
             "path": str(sample.image),
             "category": self.category,
             "defect_type": sample.defect_type,
@@ -50,14 +51,27 @@ def image_files(path: Path) -> list[Path]:
     return sorted(p for p in path.rglob("*") if p.suffix.lower() in IMAGE_EXTENSIONS)
 
 
+def safe_path(root: str | Path, value: str | Path, field: str) -> Path:
+    root = Path(root).resolve()
+    candidate_value = Path(value)
+    if candidate_value.is_absolute():
+        raise ValueError(f"{field} must be relative to dataset root")
+    candidate = (root / candidate_value).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise ValueError(f"{field} escapes dataset root: {value!s}")
+    return candidate
+
+
 def normal_train_val_split(samples: list[Sample], val_fraction: float, seed: int):
     """Split normal training samples deterministically; test data is never touched."""
     import random
 
     items = samples.copy()
     random.Random(seed).shuffle(items)
-    if len(items) < 2 or val_fraction <= 0:
-        return items, items[: min(1, len(items))]
+    if len(items) < 2:
+        raise ValueError("At least two normal samples are required for disjoint train/val splits")
+    if not 0 < val_fraction < 1:
+        raise ValueError("val_fraction must be strictly between 0 and 1")
     n_val = max(1, round(len(items) * val_fraction))
     n_val = min(n_val, len(items) - 1)
     return items[n_val:], items[:n_val]

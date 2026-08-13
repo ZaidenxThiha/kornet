@@ -3,6 +3,6 @@ seed: 42
 output_dir: runs
 dataset: {name: mvtec_ad2, root: data/mvtec_ad2, category: can, image_size: 256, val_fraction: 0.1, num_workers: 4}
 model: {variant: kornet_adaptive, backbone: resnet18, pretrained: true, feature_dim: 256, rank_heads: 4, sort_mode: soft, sort_temperature: 0.1, sinkhorn_iterations: 5, max_tokens: 256, max_iterations: 7, train_iterations: 4, min_iterations: 1, adaptive_stop: true, convergence_threshold: 0.001, convergence_patience: 2, dropout: 0.1, multi_scale: true, ranking: learned, opposing_subtraction: true, score_weights: [1.0, 0.2, 0.1]}
-training: {epochs: 100, batch_size: 16, learning_rate: 0.0001, weight_decay: 0.0001, warmup_epochs: 5, mixed_precision: true, gradient_clip: 1.0, early_stopping_patience: 15, fixed_iterations_until_epoch: 20, wandb: false, resume: null}
+training: {epochs: 100, batch_size: 16, learning_rate: 0.0001, weight_decay: 0.0001, warmup_epochs: 5, mixed_precision: true, gradient_clip: 1.0, early_stopping_patience: 15, checkpoint_metric: val_proxy_score, fixed_iterations_until_epoch: 20, wandb: false, resume: null}
 loss: {compactness: 1.0, convergence: 0.05, stability: 0.05, variance: 0.01}
-evaluation: {threshold_source: validation, gaussian_sigma: 4.0, save_visualizations: true}
+evaluation: {threshold_source: validation, sort_mode: hard, adaptive: false, gaussian_sigma: 4.0}

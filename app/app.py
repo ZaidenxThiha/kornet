@@ -17,8 +17,14 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from datasets.transforms import build_transform
 from models import build_model
-from utils.checkpoint import load_checkpoint
+from utils.checkpoint import confined_checkpoint, load_checkpoint, load_checkpoint_payload
 from utils.device import default_device, synchronize
+from utils.inference import (
+    calibrated_image_threshold,
+    gaussian_smooth,
+    protocol_matches,
+    resolve_inference_protocol,
+)
 from utils.visualization import heatmap_overlay, normalize_map
 
 st.set_page_config(page_title="KORNet Inspector", page_icon="🔬", layout="wide")
@@ -43,7 +49,8 @@ def checkpoints():
 
 @st.cache_resource(show_spinner="Loading model…")
 def load_model(path: str):
-    state = torch.load(path, map_location="cpu", weights_only=False)
+    path = confined_checkpoint(path, [PROJECT_ROOT / "runs", PROJECT_ROOT / "checkpoints"])
+    state = load_checkpoint_payload(path)
     config = state.get("config")
     if not config:
         raise ValueError("Checkpoint has no embedded configuration")
@@ -52,8 +59,9 @@ def load_model(path: str):
     load_checkpoint(path, model, map_location=device)
     metrics_path = Path(path).with_name("metrics.json")
     metrics = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
-    threshold = metrics.get("image", {}).get("threshold")
-    return model, config, device, threshold, metrics
+    protocol = resolve_inference_protocol(config)
+    threshold = calibrated_image_threshold(metrics, protocol)
+    return model, config, device, threshold, metrics, protocol
 
 
 def box_image(image: Image.Image, anomaly_map: np.ndarray):
@@ -75,17 +83,12 @@ st.caption("Kaprekar-Inspired Recursive Opposing-Ranking Network · experimental
 available = checkpoints()
 with st.sidebar:
     st.header("Model")
-    if available:
-        selected = st.selectbox(
+    selected = (
+        st.selectbox(
             "Checkpoint", available, format_func=lambda p: str(p.relative_to(PROJECT_ROOT))
         )
-    else:
-        selected_text = st.text_input("Checkpoint path", placeholder="runs/.../best.pt")
-        selected = Path(selected_text) if selected_text else None
-    sorting = st.selectbox(
-        "Inference ranking",
-        ["hard", "soft"],
-        help="Hard ranking is exact and optimized; soft ranking matches training relaxation.",
+        if available
+        else None
     )
     uploaded = st.file_uploader("Inspection image", type=["jpg", "jpeg", "png"])
     st.divider()
@@ -101,23 +104,28 @@ if uploaded is None:
     st.stop()
 
 try:
-    model, config, device, threshold, metrics = load_model(str(selected))
+    model, config, device, threshold, metrics, protocol = load_model(str(selected))
     image = Image.open(uploaded).convert("RGB")
     size = config["dataset"].get("image_size", 256)
     tensor, _ = build_transform(size)(image)
     with st.spinner("Running recursive opposing-ranking analysis…"), torch.inference_mode():
         start = time.perf_counter()
-        output = model(tensor[None].to(device), sort_mode=sorting)
+        output = model(
+            tensor[None].to(device),
+            adaptive=protocol.adaptive,
+            sort_mode=protocol.sort_mode,
+        )
         synchronize(device)
         latency = (time.perf_counter() - start) * 1000
 except Exception as exc:  # noqa: BLE001 - the UI must render model/load failures cleanly
-    st.exception(exc)
+    st.error(f"Unable to run this trusted checkpoint: {type(exc).__name__}")
     st.stop()
 
 score = float(output["image_score"][0])
 iterations = int(output["iterations"][0])
 deltas = output["deltas"][0, :iterations].cpu().numpy()
-anomaly_map = output["anomaly_map"][0, 0].cpu().numpy()
+anomaly_map = gaussian_smooth(output["anomaly_map"], protocol.gaussian_sigma)
+anomaly_map = anomaly_map[0, 0].cpu().numpy()
 display_image = np.asarray(image.resize((size, size)))
 overlay = heatmap_overlay(display_image, anomaly_map)
 status = "UNCALIBRATED" if threshold is None else ("DEFECT" if score >= threshold else "NORMAL")
@@ -190,7 +198,8 @@ with tab_model:
             "dataset": config["dataset"].get("name"),
             "category": config["dataset"].get("category"),
             "backbone": config["model"].get("backbone"),
-            "ranking": sorting,
+            "inference_protocol": protocol.as_dict(),
+            "metrics_protocol_match": protocol_matches(metrics, protocol),
             "measured_test_metrics": metrics or "Not evaluated",
         }
     )

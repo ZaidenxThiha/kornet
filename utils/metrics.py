@@ -4,6 +4,7 @@ import math
 
 import numpy as np
 from scipy import ndimage
+from scipy.integrate import trapezoid as scipy_trapezoid
 from sklearn.metrics import (
     average_precision_score,
     confusion_matrix,
@@ -25,6 +26,8 @@ def calibrate_threshold(normal_scores, percentile: float = 99.0) -> float:
     scores = np.asarray(normal_scores, dtype=np.float64)
     if scores.size == 0:
         raise ValueError("Cannot calibrate a threshold without validation-normal scores")
+    if not np.isfinite(scores).all():
+        raise ValueError("Threshold calibration scores must all be finite")
     return float(np.percentile(scores, percentile))
 
 
@@ -49,6 +52,13 @@ def classification_metrics(labels, scores, threshold) -> dict:
 
 
 def pixel_metrics(masks, maps, threshold=None) -> dict:
+    if np.asarray(masks).size == 0 or np.asarray(maps).size == 0:
+        return {
+            "pixel_auroc": None,
+            "pixel_average_precision": None,
+            "aupro": None,
+            **({"pixel_f1": None} if threshold is not None else {}),
+        }
     labels = np.asarray(masks).reshape(-1).astype(int)
     scores = np.asarray(maps).reshape(-1)
     result = {
@@ -88,7 +98,8 @@ def region_pro_auc(masks, maps, max_fpr: float = 0.3, steps: int = 100) -> float
     if len(fprs) < 2:
         return None
     order = np.argsort(fprs)
-    return float(np.trapezoid(np.asarray(pros)[order], np.asarray(fprs)[order]) / max_fpr)
+    trapezoid = getattr(np, "trapezoid", scipy_trapezoid)
+    return float(trapezoid(np.asarray(pros)[order], np.asarray(fprs)[order]) / max_fpr)
 
 
 def summarize_iterations(iterations) -> dict:

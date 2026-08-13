@@ -12,7 +12,9 @@ class NeuralSorter(nn.Module):
     Complexity is O(B H N^2), which is why KORNet caps N explicitly.
     """
 
-    def __init__(self, temperature: float = 0.1, mode: str = "soft") -> None:
+    def __init__(
+        self, temperature: float = 0.1, mode: str = "soft", sinkhorn_iterations: int = 0
+    ) -> None:
         super().__init__()
         if temperature <= 0:
             raise ValueError("temperature must be positive")
@@ -20,6 +22,9 @@ class NeuralSorter(nn.Module):
             raise ValueError("sort mode must be 'soft' or 'hard'")
         self.temperature = temperature
         self.mode = mode
+        if sinkhorn_iterations < 0:
+            raise ValueError("sinkhorn_iterations must be non-negative")
+        self.sinkhorn_iterations = sinkhorn_iterations
 
     @staticmethod
     def hard_permutation(scores: torch.Tensor, descending: bool) -> torch.Tensor:
@@ -35,7 +40,11 @@ class NeuralSorter(nn.Module):
         scaling = n + 1 - 2 * ranks
         logits = scaling.view(*([1] * (scores.ndim - 1)), n, 1) * scores.unsqueeze(-2)
         logits = logits - pairwise.unsqueeze(-2)
-        return torch.softmax(logits / self.temperature, dim=-1)
+        permutation = torch.softmax(logits / self.temperature, dim=-1)
+        for _ in range(self.sinkhorn_iterations):
+            permutation = permutation / permutation.sum(dim=-2, keepdim=True).clamp_min(1e-8)
+            permutation = permutation / permutation.sum(dim=-1, keepdim=True).clamp_min(1e-8)
+        return permutation
 
     def forward(self, scores: torch.Tensor, descending: bool = True, mode: str | None = None):
         selected = mode or self.mode

@@ -31,7 +31,7 @@ ABLATIONS = {
     "iterations_7": {"model.max_iterations": 7, "model.train_iterations": 4},
     "iterations_10": {"model.max_iterations": 10, "model.train_iterations": 5},
     "fixed": {"model.adaptive_stop": False},
-    "soft_sort": {"model.sort_mode": "soft"},
+    "soft_sort": {"evaluation.sort_mode": "soft"},
     "single_scale": {"model.multi_scale": False},
     "magnitude_ranking": {"model.ranking": "magnitude"},
     "no_convergence_loss": {"loss.convergence": 0.0},

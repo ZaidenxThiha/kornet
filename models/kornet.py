@@ -34,7 +34,6 @@ class KORNet(nn.Module):
         initial_residual_weight=0.0,
         topk_fraction=1.0,
         variance_floor=1e-4,
-        **_: dict,
     ) -> None:
         super().__init__()
         self.backbone = FeatureBackbone(backbone, pretrained)
@@ -49,6 +48,7 @@ class KORNet(nn.Module):
             dropout,
             ranking,
             opposing_subtraction,
+            sinkhorn_iterations,
         )
         self.anomaly_head = AnomalyHead(
             feature_dim,
@@ -66,7 +66,6 @@ class KORNet(nn.Module):
         self.convergence_threshold = convergence_threshold
         self.convergence_patience = convergence_patience
         self.feature_dim = feature_dim
-        self.sinkhorn_iterations = sinkhorn_iterations  # recorded for configuration compatibility
 
     def forward(
         self,

@@ -18,9 +18,18 @@ class KORNetLoss(nn.Module):
             "variance": variance,
         }
 
-    def forward(self, output: dict, prototype: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(
+        self,
+        output: dict,
+        prototype: torch.Tensor,
+        prototype_initialized: bool = True,
+    ) -> dict[str, torch.Tensor]:
         tokens = output["tokens"]
-        compactness = (tokens - prototype.to(tokens)).pow(2).mean()
+        compactness = (
+            (tokens - prototype.to(tokens)).pow(2).mean()
+            if prototype_initialized
+            else tokens.new_zeros(())
+        )
         states = output["states"]
         late_transitions = [(b - a).pow(2).mean() for a, b in pairwise(states)]
         convergence = (

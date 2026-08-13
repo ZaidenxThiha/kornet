@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from .common import AnomalyDataset, Sample, image_files, normal_train_val_split
+from .common import AnomalyDataset, Sample, image_files, normal_train_val_split, safe_path
 from .transforms import build_transform
 
 
@@ -17,24 +17,25 @@ def _from_split_csv(root: Path, category: str) -> tuple[list[Sample], list[Sampl
         for row in csv.DictReader(handle):
             if row.get("object") != category:
                 continue
-            image = root / row["image"]
+            image = safe_path(root, row["image"], "VisA CSV image")
             label = int(row.get("label", "normal") not in {"normal", "good", "0"})
             mask_value = row.get("mask", "")
             sample = Sample(
                 image,
                 label,
                 "anomaly" if label else "good",
-                root / mask_value if mask_value else None,
+                safe_path(root, mask_value, "VisA CSV mask") if mask_value else None,
             )
             (train if row.get("split", "test") == "train" else test).append(sample)
     return train, test
 
 
 def build_visa(root: str | Path, category: str, image_size: int, val_fraction=0.1, seed=42):
-    root = Path(root)
+    root = Path(root).resolve()
+    safe_path(root, category, "category")
     parsed = _from_split_csv(root, category)
     if parsed is None:
-        data_root = root / category / "Data"
+        data_root = safe_path(root, Path(category) / "Data", "category")
         if not data_root.exists():
             raise FileNotFoundError(
                 f"VisA not found at {root.resolve()}. Download it under the terms of its official "

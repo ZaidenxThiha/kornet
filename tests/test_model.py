@@ -104,6 +104,22 @@ def test_cnn_baseline_has_no_kor_parameters_and_loss_executes():
     assert torch.isfinite(losses["total"])
 
 
+def test_uninitialized_prototype_does_not_bias_first_batch_compactness():
+    model = small_model().train()
+    output = model(torch.randn(2, 3, 64, 64))
+    criterion = KORNetLoss()
+    cold = criterion(output, model.anomaly_head.prototype, prototype_initialized=False)
+    assert cold["compactness"].item() == 0
+    model.anomaly_head.update_prototype(output["tokens"], output["initial_tokens"])
+    warm = criterion(output, model.anomaly_head.prototype, prototype_initialized=True)
+    assert warm["compactness"].item() > 0
+
+
+def test_unknown_model_keys_are_rejected():
+    with pytest.raises(TypeError, match="unexpected keyword"):
+        small_model(unknown_option=True)
+
+
 @pytest.mark.parametrize("backbone", ["resnet18", "efficientnet_b0", "convnext_tiny"])
 def test_supported_backbone_shapes(backbone):
     model = KORNet(

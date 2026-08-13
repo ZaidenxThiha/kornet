@@ -18,6 +18,7 @@ class KORBlock(nn.Module):
         dropout: float = 0.1,
         ranking: str = "learned",
         opposing_subtraction: bool = True,
+        sinkhorn_iterations: int = 0,
     ) -> None:
         super().__init__()
         if heads < 1:
@@ -26,7 +27,7 @@ class KORBlock(nn.Module):
         self.ranking = ranking
         self.opposing_subtraction = opposing_subtraction
         self.rank_net = nn.Sequential(nn.LayerNorm(dim), nn.Linear(dim, heads))
-        self.sorter = NeuralSorter(temperature, sort_mode)
+        self.sorter = NeuralSorter(temperature, sort_mode, sinkhorn_iterations)
         self.combine = nn.Linear(dim * heads, dim)
         self.phi = nn.Sequential(
             nn.Linear(dim, dim * 2), nn.GELU(), nn.Dropout(dropout), nn.Linear(dim * 2, dim)

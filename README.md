@@ -50,7 +50,7 @@ pip install -e '.[app,research,export,dev]'
 pytest
 ```
 
-For a minimal training environment, use `pip install -r requirements.txt`.
+For a minimal training environment, use `pip install -r requirements.txt`. For an exact full development/research environment, use `pip install -r requirements.lock`; regenerate it with `uv pip compile pyproject.toml --all-extras -o requirements.lock` when dependencies change.
 
 ## Datasets and leakage policy
 
@@ -93,11 +93,11 @@ Train all categories with the default three seeds (42, 123, 456):
 python scripts/train_all_categories.py --config configs/kornet_mvtec.yaml
 ```
 
-Evaluate. The first command matches soft training; the second benchmarks exact hard ranking. Both calibrate thresholds using validation normals before touching the test loader.
+Evaluate with the configured deployment protocol. The default is versioned as hard ranking, fixed iterations, and Gaussian σ=4. Validation calibration and test scoring always use the same protocol. Overrides are recorded in the output and their thresholds are not reused by another protocol.
 
 ```bash
-python evaluate.py --checkpoint runs/kornet_mvtec_bottle/seed_42/best.pt --sort-mode soft
-python evaluate.py --checkpoint runs/kornet_mvtec_bottle/seed_42/best.pt --sort-mode hard --output runs/kornet_mvtec_bottle/seed_42/metrics_hard.json
+python evaluate.py --checkpoint runs/kornet_mvtec_bottle/seed_42/best.pt
+python evaluate.py --checkpoint runs/kornet_mvtec_bottle/seed_42/best.pt --sort-mode soft --output runs/kornet_mvtec_bottle/seed_42/metrics_soft.json
 ```
 
 Run fair internal baselines with the same configuration/backbone:
@@ -135,22 +135,22 @@ python scripts/benchmark.py --results runs --output runs/benchmark.csv
 Inspect one image and launch the application:
 
 ```bash
-python predict.py --checkpoint runs/kornet_mvtec_bottle/seed_42/best.pt --image data/mvtec/bottle/test/broken_large/000.png --sort-mode hard
+python predict.py --checkpoint runs/kornet_mvtec_bottle/seed_42/best.pt --image data/mvtec/bottle/test/broken_large/000.png
 streamlit run app/app.py
 ```
 
 Export and benchmark the deployment operator separately:
 
 ```bash
-python export.py --checkpoint runs/kornet_mvtec_bottle/seed_42/best.pt --format torchscript --sort-mode hard --output outputs/kornet.ts
-python export.py --checkpoint runs/kornet_mvtec_bottle/seed_42/best.pt --format onnx --sort-mode soft --output outputs/kornet.onnx
+python export.py --checkpoint runs/kornet_mvtec_bottle/seed_42/best.pt --format torchscript --output outputs/kornet.ts
+python export.py --checkpoint runs/kornet_mvtec_bottle/seed_42/best.pt --format onnx --output outputs/kornet.onnx
 ```
 
 ## Configuration
 
 The YAML files control the backbone (`resnet18`, `efficientnet_b0`, `convnext_tiny`), feature dimension, ranking heads and temperature, token budget, recursive limits, stopping policy, score weights, optimizer, and every loss coefficient. Pretrained ImageNet weights are preferred; if they cannot be downloaded, the backbone emits a warning and remains executable with random initialization.
 
-The normal prototype is an exponential moving average. The objective combines compactness, late-iteration convergence, fixed-point stability, and a variance hinge. Feature variance is logged each epoch and values below `1e-3` trigger an anti-collapse warning.
+The normal prototype is an exponential moving average updated only after the optimizer step, so each compactness target is based on prior batches. The first batch omits compactness while bootstrapping the prototype. The objective combines compactness, late-iteration convergence, fixed-point stability, and a variance hinge. Feature variance is logged each epoch and values below `1e-3` trigger an anti-collapse warning. New runs select `best.pt` by a normal-only validation proxy score: deterministic patch-flip corruptions and untouched validation normals are scored with the configured deployment protocol, prioritizing proxy AUROC and using bounded standardized score separation to break AUROC ties. Final test anomalies remain unavailable to checkpoint selection.
 
 ## Metrics and research protocol
 
@@ -164,43 +164,45 @@ The five original controlled model families and the optimized model below were e
 
 | Model | Image AUROC | Pixel AUROC | AUPRO | Image F1 | Params | FLOPs | MPS ms/image | Avg iterations |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| CNN | 99.58 ± 0.12% | **95.62 ± 0.06%** | **68.57 ± 2.76%** | 95.54 ± 3.60% | 11.41M | 4.88G | **3.18 ± 0.05** | 0.00 |
-| CNN + attention | 96.40 ± 0.26% | 77.85 ± 3.14% | 22.08 ± 3.90% | 86.37 ± 4.56% | 11.67M | 4.88G | 3.90 ± 0.99 | 1.00 |
-| CNN + KOR-1 | 96.59 ± 0.57% | 79.93 ± 2.55% | 26.44 ± 7.09% | 85.35 ± 4.17% | 12.00M | 5.39G | 4.42 ± 0.04 | 1.00 |
-| KORNet fixed | 96.24 ± 0.36% | 89.69 ± 0.37% | 44.35 ± 6.38% | 90.96 ± 1.64% | 12.00M | 6.93G | 8.20 ± 0.03 | 7.00 |
-| KORNet adaptive | 97.14 ± 1.33% | 88.84 ± 2.21% | 49.15 ± 2.78% | 91.67 ± 3.64% | 12.00M | 6.93G | 8.15 ± 0.04 | 7.00 |
-| **KORNet optimized** | **99.84 ± 0.08%** | 93.12 ± 0.51% | 56.63 ± 4.88% | **98.14 ± 0.50%** | 11.77M | 6.00G | 6.25 ± 0.25 | 5.00 |
+| CNN | 99.58 ± 0.12% | **95.62 ± 0.06%** | **68.57 ± 2.76%** | 95.54 ± 3.60% | 11.41M | 4.88G | **4.19 ± 0.21** | 0.00 |
+| CNN + attention | 96.40 ± 0.26% | 77.85 ± 3.14% | 22.08 ± 3.90% | 86.37 ± 4.56% | 11.67M | 4.88G | 4.46 ± 0.13 | 1.00 |
+| CNN + KOR-1 | 96.59 ± 0.57% | 79.93 ± 2.55% | 26.44 ± 7.09% | 85.35 ± 4.17% | 12.00M | 5.39G | 5.07 ± 0.14 | 1.00 |
+| KORNet fixed | 96.24 ± 0.36% | 89.69 ± 0.37% | 44.35 ± 6.38% | 90.96 ± 1.64% | 12.00M | 6.93G | 9.60 ± 1.52 | 7.00 |
+| KORNet adaptive | 97.14 ± 1.33% | 88.84 ± 2.21% | 49.15 ± 2.78% | 91.67 ± 3.64% | 12.00M | 6.93G | 9.38 ± 0.94 | 7.00 |
+| **KORNet optimized** | **99.84 ± 0.08%** | 93.12 ± 0.51% | 56.63 ± 4.88% | **98.14 ± 0.50%** | 11.77M | 6.00G | 6.96 ± 0.03 | 5.00 |
 
-Optimized KORNet beats the matched CNN on image AUROC for every seed and improves the three-seed mean by 0.26 percentage points. It also improves mean image F1 by 2.60 points. This is an image-level detection gain, not an overall win: CNN remains better on pixel AUROC (95.62% versus 93.12%), AUPRO (68.57% versus 56.63%), and MPS latency (3.18 ms versus 6.25 ms). The original adaptive model reached its seven-iteration maximum for every evaluated sample; the optimized model uses a five-iteration maximum and likewise does not show an adaptive-stopping gain on Bottle.
+Optimized KORNet beats the matched CNN on image AUROC for every seed and improves the three-seed mean by 0.26 percentage points. It also improves mean image F1 by 2.60 points. This is an image-level detection gain, not an overall win: CNN remains better on pixel AUROC (95.62% versus 93.12%), AUPRO (68.57% versus 56.63%), and MPS latency (4.19 ms versus 6.96 ms). The original adaptive model reached its seven-iteration maximum for every evaluated sample; the optimized model uses a five-iteration maximum and likewise does not show an adaptive-stopping gain on Bottle.
 
 The mandatory architectural ablations below use seed 42 and are therefore diagnostic single-run results, not uncertainty estimates. Equivalent controls reuse the identical completed run: heads=4 and iterations=7 use the default adaptive checkpoint; iterations=1 uses the no-recursion checkpoint; fixed uses the fixed-family checkpoint. This avoids relabeling duplicate computation as independent evidence.
 
 | Ablation | Image AUROC | Pixel AUROC | AUPRO | Image F1 | MPS ms/image | Iterations |
 |---|---:|---:|---:|---:|---:|---:|
-| No opposing subtraction | 87.70% | 77.59% | 45.02% | 72.73% | 7.84 | 7 |
-| No recursion / iterations=1 | 97.62% | 81.18% | 29.03% | 88.50% | 4.36 | 1 |
-| Heads=1 | 26.90% | 41.03% | 8.63% | 6.15% | 8.60 | 7 |
-| Heads=2 | 97.30% | 90.33% | 54.35% | 94.12% | 6.55 | 7 |
-| Heads=4 (default) | 98.57% | 90.33% | 52.36% | 95.87% | 8.17 | 7 |
-| Heads=8 | 95.87% | 88.15% | 51.60% | 93.33% | 12.56 | 7 |
-| Iterations=2 | 94.37% | 91.09% | 55.03% | 90.43% | 5.04 | 2 |
-| Iterations=3 | 95.40% | 90.25% | 48.70% | 92.31% | 5.64 | 3 |
-| Iterations=5 | 98.02% | 90.34% | 54.47% | 95.87% | 6.87 | 5 |
-| Iterations=7 (default) | 98.57% | 90.33% | 52.36% | 95.87% | 8.17 | 7 |
-| Iterations=10 | 95.40% | 80.48% | 38.65% | 90.76% | 10.16 | 10 |
-| Fixed stopping | 96.59% | 89.26% | 40.66% | 90.43% | 8.17 | 7 |
-| Single-scale features | **99.44%** | **93.16%** | **63.05%** | **98.39%** | 8.54 | 7 |
-| Magnitude ranking | 97.14% | 90.87% | 51.24% | 91.67% | 8.05 | 7 |
-| No convergence loss | 96.43% | 87.42% | 46.85% | 92.31% | 8.25 | 7 |
+| No opposing subtraction | 87.70% | 77.59% | 45.02% | 72.73% | 8.19 | 7 |
+| No recursion / iterations=1 | 97.62% | 81.18% | 29.03% | 88.50% | 5.30 | 1 |
+| Heads=1 | 26.90% | 41.03% | 8.63% | 6.15% | 6.22 | 7 |
+| Heads=2 | 97.30% | 90.33% | 54.35% | 94.12% | 7.45 | 7 |
+| Heads=4 (default) | 98.57% | 90.33% | 52.36% | 95.87% | 10.06 | 7 |
+| Heads=8 | 95.87% | 88.15% | 51.60% | 93.33% | 12.74 | 7 |
+| Iterations=2 | 94.37% | 91.09% | 55.03% | 90.43% | 5.81 | 2 |
+| Iterations=3 | 95.40% | 90.25% | 48.70% | 92.31% | 6.05 | 3 |
+| Iterations=5 | 98.02% | 90.34% | 54.47% | 95.87% | 7.75 | 5 |
+| Iterations=7 (default) | 98.57% | 90.33% | 52.36% | 95.87% | 10.06 | 7 |
+| Iterations=10 | 95.40% | 80.48% | 38.65% | 90.76% | 11.04 | 10 |
+| Fixed stopping | 96.59% | 89.26% | 40.66% | 90.43% | 9.36 | 7 |
+| Single-scale features | **99.44%** | **93.16%** | **63.05%** | **98.39%** | 9.05 | 7 |
+| Magnitude ranking | 97.14% | 90.87% | 51.24% | 91.67% | 8.18 | 7 |
+| No convergence loss | 96.43% | 87.42% | 46.85% | 92.31% | 8.33 | 7 |
 
 Hard and soft sorting were also evaluated from the same default seed-42 checkpoint:
 
 | Ranking | Image AUROC | Pixel AUROC | AUPRO | Image F1 | MPS ms/image |
 |---|---:|---:|---:|---:|---:|
-| Hard (`torch.argsort`) | **98.57%** | 90.33% | **52.36%** | **95.87%** | **8.17** |
-| Soft (NeuralSort) | 98.33% | **90.59%** | 52.30% | 95.00% | 11.82 |
+| Hard (`torch.argsort`) | **98.57%** | 90.33% | 52.36% | **95.87%** | **10.06** |
+| Soft (NeuralSort + Sinkhorn) | 98.17% | **90.55%** | **53.54%** | 95.00% | 26.96 |
 
 All primary and optimized runs reached 100 epochs. The heads=8, iterations=10, and no-convergence-loss ablations stopped at epoch 35 under the configured normal-validation early-stopping rule; all other distinct ablations reached 100 epochs. Latency is measured on Apple MPS and includes model forward synchronization but not data loading. It is a local deployment measurement rather than a cross-hardware comparison.
+
+These stored Bottle checkpoints predate proxy-AUROC checkpoint selection and were selected by normal-validation loss. Their metrics were recalibrated under inference protocol version 1, but a future paper comparison should retrain every family under the new selection rule rather than mixing checkpoint-selection policies.
 
 The complete per-run records are generated by `scripts/benchmark.py` as `runs/benchmark.csv` and `runs/benchmark_summary.csv`. Checkpoints, the licensed dataset, and generated predictions remain excluded from Git; rerun the documented commands to reproduce them locally.
 
@@ -208,7 +210,7 @@ For established baselines, use their official repositories or a pinned release o
 
 ## Visual outputs
 
-The Streamlit app shows the input, raw heatmap, overlay, estimated region, score, threshold margin, device latency, recursive iterations, and convergence curve. It deliberately labels a result `UNCALIBRATED` when no validation-derived `metrics.json` is present. A raw anomaly score or threshold margin is not described as a probability.
+The Streamlit app shows the input, protocol-smoothed heatmap, overlay, estimated region, score, threshold margin, device latency, recursive iterations, and convergence curve. It deliberately labels a result `UNCALIBRATED` when no validation-derived `metrics.json` is present or its versioned inference signature differs. A raw anomaly score or threshold margin is not described as a probability. The app loads checkpoints only from this project's `runs/` and `checkpoints/` directories using PyTorch's restricted weights-only loader.
 
 Ranking scores are returned per head and iteration by the model for interpretability experiments. Training curves are saved in every run. `utils/visualization.py` provides research-ready raster heatmaps, while experiment JSON/CSV remains the source of record for plots and paper tables.
 
@@ -235,7 +237,7 @@ export.py                 TorchScript and ONNX export
 - NeuralSort is quadratic in token count. Token reduction makes this honest and configurable but may discard small defects.
 - The simple global normal prototype can under-represent multimodal normal data. A category-specific memory bank is a justified future comparison.
 - AUPRO protocol details differ between libraries. This repository integrates PRO up to FPR 0.3; paper comparisons must use a consistent implementation.
-- Gaussian smoothing is evaluation-only and recorded in the output protocol.
+- Gaussian smoothing is shared by evaluation, prediction, export, and the app and is recorded in the versioned output protocol.
 - Per-sample stopping still executes batched recursive calls until all samples finish, though completed samples are frozen. Deployment throughput therefore depends on batch composition.
 - ONNX operator support varies by runtime, particularly for exact sorting; the soft and hard exports must be validated on the intended runtime.
 - Optimized KORNet confirms a small, repeatable Bottle image-level AUROC gain over the controlled CNN, but it remains worse at pixel localization and latency. Broader category-level evidence is required before drawing a general conclusion.

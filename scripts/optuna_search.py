@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from train import train
+from utils.checkpoint import load_checkpoint_payload
 from utils.config import load_config
 
 
@@ -47,8 +48,9 @@ def main():
         config["model"]["max_tokens"] = trial.suggest_categorical("max_tokens", [64, 144, 256])
         config["loss"]["convergence"] = trial.suggest_float("convergence_weight", 0.0, 0.2)
         checkpoint = train(config)
-        state = __import__("torch").load(checkpoint, map_location="cpu", weights_only=False)
-        return -float(state["best_metric"])  # validation-normal objective; final test is never read
+        state = load_checkpoint_payload(checkpoint)
+        value = float(state["best_metric"])
+        return -value if state.get("metric_name") == "val_loss" else value
 
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=args.trials)

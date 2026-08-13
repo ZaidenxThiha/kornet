@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .common import AnomalyDataset, Sample, image_files, normal_train_val_split
+from .common import AnomalyDataset, Sample, image_files, normal_train_val_split, safe_path
 from .transforms import build_transform
 
 
@@ -21,7 +21,7 @@ def _test_samples(category_root: Path) -> list[Sample]:
 
 
 def build_mvtec(root: str | Path, category: str, image_size: int, val_fraction=0.1, seed=42):
-    category_root = Path(root) / category
+    category_root = safe_path(root, category, "category")
     if not (category_root / "train" / "good").exists():
         raise FileNotFoundError(
             f"MVTec AD category not found at {category_root}. Place the official dataset under "

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .common import AnomalyDataset, Sample, image_files, normal_train_val_split
+from .common import AnomalyDataset, Sample, image_files, normal_train_val_split, safe_path
 from .transforms import build_transform
 
 
 def build_mvtec_ad2(root: str | Path, category: str, image_size: int, val_fraction=0.1, seed=42):
-    category_root = Path(root) / category
+    category_root = safe_path(root, category, "category")
     train_root = category_root / "train" / "good"
     if not train_root.exists():
         raise FileNotFoundError(

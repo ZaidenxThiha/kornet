@@ -38,6 +38,7 @@ training:
   mixed_precision: true
   gradient_clip: 1.0
   early_stopping_patience: 15
+  checkpoint_metric: val_proxy_score
   fixed_iterations_until_epoch: 20
   wandb: false
   resume: null
@@ -48,5 +49,6 @@ loss:
   variance: 0.01
 evaluation:
   threshold_source: validation
+  sort_mode: hard
+  adaptive: false
   gaussian_sigma: 4.0
-  save_visualizations: true

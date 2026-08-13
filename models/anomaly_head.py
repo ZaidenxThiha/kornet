@@ -32,6 +32,7 @@ class AnomalyHead(nn.Module):
         self.spatial_weight = spatial_weight
         self.initial_residual_weight = initial_residual_weight
         self.topk_fraction = topk_fraction
+        self.topk_count = max(1, round(token_count * topk_fraction)) if token_count else None
         self.variance_floor = variance_floor
         self.register_buffer("score_weights", torch.tensor(score_weights, dtype=torch.float32))
         if spatial_weight:
@@ -121,7 +122,7 @@ class AnomalyHead(nn.Module):
                 self.initial_residual_weight * initial_distance
                 + (1 - self.initial_residual_weight) * token_distance
             )
-        topk = max(1, round(token_distance.shape[1] * self.topk_fraction))
+        topk = self.topk_count or token_distance.shape[1]
         attractor_score = token_distance.topk(topk, dim=1).values.mean(1)
         if dynamics:
             stacked_dynamics = torch.stack(dynamics, dim=1)

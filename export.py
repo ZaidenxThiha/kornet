@@ -7,26 +7,45 @@ import torch
 from torch import nn
 
 from models import build_model
-from utils.checkpoint import load_checkpoint
+from utils.checkpoint import load_checkpoint, load_checkpoint_payload
+from utils.inference import gaussian_smooth, resolve_inference_protocol
 
 
 class ExportWrapper(nn.Module):
-    def __init__(self, model, sort_mode="hard"):
+    def __init__(self, model, protocol):
         super().__init__()
         self.model = model
-        self.sort_mode = sort_mode
+        self.protocol = protocol
 
     def forward(self, image):
-        output = self.model(image, adaptive=False, sort_mode=self.sort_mode)
-        return output["image_score"], output["anomaly_map"], output["deltas"]
+        output = self.model(
+            image,
+            adaptive=self.protocol.adaptive,
+            sort_mode=self.protocol.sort_mode,
+        )
+        anomaly_map = gaussian_smooth(output["anomaly_map"], self.protocol.gaussian_sigma)
+        return output["image_score"], anomaly_map, output["deltas"]
 
 
-def export_model(checkpoint, output, fmt="torchscript", sort_mode="hard"):
-    state = torch.load(checkpoint, map_location="cpu", weights_only=False)
+def export_model(
+    checkpoint, output, fmt="torchscript", sort_mode=None, adaptive=None, gaussian_sigma=None
+):
+    state = load_checkpoint_payload(checkpoint)
     config = state["config"]
+    protocol = resolve_inference_protocol(
+        config,
+        sort_mode=sort_mode,
+        adaptive=adaptive,
+        gaussian_sigma=gaussian_sigma,
+    )
+    if protocol.adaptive:
+        raise ValueError(
+            "Adaptive stopping cannot be faithfully represented by trace-based export; "
+            "use the default fixed protocol or pass --no-adaptive"
+        )
     model = build_model(config["model"]).eval()
     load_checkpoint(checkpoint, model)
-    wrapper = ExportWrapper(model, sort_mode).eval()
+    wrapper = ExportWrapper(model, protocol).eval()
     size = config["dataset"].get("image_size", 256)
     sample = torch.randn(1, 3, size, size)
     output = Path(output)
@@ -57,9 +76,18 @@ def main():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--format", choices=["torchscript", "onnx"], default="torchscript")
-    parser.add_argument("--sort-mode", choices=["soft", "hard"], default="hard")
+    parser.add_argument("--sort-mode", choices=["soft", "hard"])
+    parser.add_argument("--adaptive", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--gaussian-sigma", type=float)
     args = parser.parse_args()
-    export_model(args.checkpoint, args.output, args.format, args.sort_mode)
+    export_model(
+        args.checkpoint,
+        args.output,
+        args.format,
+        args.sort_mode,
+        args.adaptive,
+        args.gaussian_sigma,
+    )
 
 
 if __name__ == "__main__":
