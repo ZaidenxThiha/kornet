@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 import numpy as np
@@ -40,16 +42,62 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+DEMO_ROOT = Path("/tmp/kornet_bottle_demo")
+DEMO_ASSETS = {
+    "best.pt": (
+        (
+            "https://github.com/ZaidenxThiha/kornet/releases/download/"
+            "demo-model-v1/kornet_bottle_demo.pt"
+        ),
+        "9b130ff573db482e7724949f4d61607197f588231792ba1cc3d30ecfbf29559f",
+    ),
+    "metrics.json": (
+        (
+            "https://github.com/ZaidenxThiha/kornet/releases/download/"
+            "demo-model-v1/kornet_bottle_metrics.json"
+        ),
+        "f938422e6548313e99dc119ada8235e9a07684c3ada5f00311368a34517a79fe",
+    ),
+}
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+@st.cache_resource(show_spinner="Downloading verified Bottle demo model…")
+def demo_checkpoint() -> Path:
+    DEMO_ROOT.mkdir(parents=True, exist_ok=True)
+    for filename, (url, expected_hash) in DEMO_ASSETS.items():
+        destination = DEMO_ROOT / filename
+        if destination.exists() and _sha256(destination) == expected_hash:
+            continue
+        temporary = destination.with_suffix(f"{destination.suffix}.download")
+        urllib.request.urlretrieve(url, temporary)
+        if _sha256(temporary) != expected_hash:
+            temporary.unlink(missing_ok=True)
+            raise RuntimeError(f"Integrity verification failed for {filename}")
+        temporary.replace(destination)
+    return DEMO_ROOT / "best.pt"
+
 
 def checkpoints():
-    return sorted(PROJECT_ROOT.glob("runs/**/best.pt")) + sorted(
+    local = sorted(PROJECT_ROOT.glob("runs/**/best.pt")) + sorted(
         PROJECT_ROOT.glob("checkpoints/*.pt")
     )
+    return local or [demo_checkpoint()]
 
 
 @st.cache_resource(show_spinner="Loading model…")
 def load_model(path: str):
-    path = confined_checkpoint(path, [PROJECT_ROOT / "runs", PROJECT_ROOT / "checkpoints"])
+    path = confined_checkpoint(
+        path,
+        [PROJECT_ROOT / "runs", PROJECT_ROOT / "checkpoints", DEMO_ROOT],
+    )
     state = load_checkpoint_payload(path)
     config = state.get("config")
     if not config:
@@ -85,7 +133,13 @@ with st.sidebar:
     st.header("Model")
     selected = (
         st.selectbox(
-            "Checkpoint", available, format_func=lambda p: str(p.relative_to(PROJECT_ROOT))
+            "Checkpoint",
+            available,
+            format_func=lambda p: (
+                str(p.relative_to(PROJECT_ROOT))
+                if PROJECT_ROOT in p.resolve().parents
+                else "Optimized KORNet · MVTec Bottle demo"
+            ),
         )
         if available
         else None
